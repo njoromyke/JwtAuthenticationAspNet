@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using JwtAuthenticationAspNet.Core.Dtos;
 using JwtAuthenticationAspNet.Core.OtherObjects;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -18,6 +19,24 @@ namespace JwtAuthenticationAspNet.Controllers
         private readonly UserManager<IdentityUser> _userManager;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _configuration;
+        private string GenerateNewJsonWebToken(List<Claim> claims)
+        {
+            var authSecret = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
+
+            var tokenObject = new JwtSecurityToken(
+                issuer: _configuration["JWT:ValidIssuer"],
+                audience: _configuration["JWT:ValidAudience"],
+                expires: DateTime.Now.AddHours(1),
+                claims: claims,
+                signingCredentials: new SigningCredentials(authSecret, SecurityAlgorithms.HmacSha256)
+            );
+
+            string token = new JwtSecurityTokenHandler().WriteToken(tokenObject);
+
+            return token;
+
+        }
+
 
         public AuthController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, IConfiguration configuration)
         {
@@ -128,22 +147,39 @@ namespace JwtAuthenticationAspNet.Controllers
             return Ok(token);
         }
 
-        private string GenerateNewJsonWebToken(List<Claim> claims)
+        //Route -> Make user-> admin
+        [HttpPost]
+        [Route("make-admin")]
+
+        public async Task<IActionResult> MakeAdmin(UpdatePermissionDto updatePermissionDto)
         {
-            var authSecret = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
+            var user = await _userManager.FindByNameAsync(updatePermissionDto.UserName);
 
-            var tokenObject = new JwtSecurityToken(
-                issuer: _configuration["JWT:ValidIssuer"],
-                audience: _configuration["JWT:ValidAudience"],
-                expires: DateTime.Now.AddHours(1),
-                claims: claims,
-                signingCredentials: new SigningCredentials(authSecret, SecurityAlgorithms.HmacSha256)
-                );
+            if (user == null)
+            {
+                return Unauthorized("Invalid UserName");
+            }
 
-            string token = new JwtSecurityTokenHandler().WriteToken(tokenObject);
-
-            return token;
-
+            await _userManager.AddToRoleAsync(user, StaticUserRoles.Admin);
+            return Ok("User is now an admin");
         }
+
+        //Route -> Make user-> owner
+        [HttpPost]
+        [Route("make-owner")]
+
+        public async Task<IActionResult> MakeOwner(UpdatePermissionDto updatePermissionDto)
+        {
+            var user = await _userManager.FindByNameAsync(updatePermissionDto.UserName);
+
+            if (user == null)
+            {
+                return Unauthorized("Invalid UserName");
+            }
+
+            await _userManager.AddToRoleAsync(user, StaticUserRoles.Owner);
+            return Ok("User is now an owner");
+        }
+
     }
 }
