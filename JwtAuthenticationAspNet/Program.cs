@@ -1,5 +1,8 @@
 using System.Text;
 using JwtAuthenticationAspNet.Core.DbContext;
+using JwtAuthenticationAspNet.Core.Entities;
+using JwtAuthenticationAspNet.Core.Interfaces;
+using JwtAuthenticationAspNet.Core.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +24,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 //Add Identity
 builder.Services
-    .AddIdentity<IdentityUser,IdentityRole>()
+    .AddIdentity<ApplicationUser,IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
@@ -57,6 +60,8 @@ builder.Services
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["JWT:Secret"]))
     };
 }); 
+
+builder.Services.AddScoped<IAuthService, AuthService>();
 
 var app = builder.Build();
 

@@ -1,14 +1,6 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using JwtAuthenticationAspNet.Core.Dtos;
-using JwtAuthenticationAspNet.Core.OtherObjects;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
+﻿using JwtAuthenticationAspNet.Core.Dtos;
+using JwtAuthenticationAspNet.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 
 namespace JwtAuthenticationAspNet.Controllers
 {
@@ -16,34 +8,14 @@ namespace JwtAuthenticationAspNet.Controllers
     [ApiController]
     public class AuthController : ControllerBase
     {
-        private readonly UserManager<IdentityUser> _userManager;
-        private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly IConfiguration _configuration;
-        private string GenerateNewJsonWebToken(List<Claim> claims)
+
+        private readonly IAuthService _authService;
+
+        public AuthController(IAuthService authService)
         {
-            var authSecret = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
-
-            var tokenObject = new JwtSecurityToken(
-                issuer: _configuration["JWT:ValidIssuer"],
-                audience: _configuration["JWT:ValidAudience"],
-                expires: DateTime.Now.AddHours(1),
-                claims: claims,
-                signingCredentials: new SigningCredentials(authSecret, SecurityAlgorithms.HmacSha256)
-            );
-
-            string token = new JwtSecurityTokenHandler().WriteToken(tokenObject);
-
-            return token;
-
+            _authService = authService;
         }
 
-
-        public AuthController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, IConfiguration configuration)
-        {
-            _userManager = userManager;
-            _roleManager = roleManager;
-            _configuration = configuration;
-        }
 
         //Route For Seeding Roles
         [HttpPost]
@@ -51,24 +23,9 @@ namespace JwtAuthenticationAspNet.Controllers
 
         public async Task<IActionResult> SeedRoles()
         {
-            bool isOwnerRoleExist = await _roleManager.RoleExistsAsync(StaticUserRoles.Owner);
-            bool isAdminRoleExist = await _roleManager.RoleExistsAsync(StaticUserRoles.Admin);
-            bool isUserRoleExist = await _roleManager.RoleExistsAsync(StaticUserRoles.User);
+            var seedRoles = await _authService.SeesRolesAsync();
 
-            if (isOwnerRoleExist && isAdminRoleExist && isUserRoleExist)
-            {
-                return Ok("Roles Already Seeded");
-            }
-
-            var admin = new IdentityRole(StaticUserRoles.Admin);
-            var owner = new IdentityRole(StaticUserRoles.Owner);
-            var user = new IdentityRole(StaticUserRoles.User);
-
-
-            await _roleManager.CreateAsync(admin);
-            await _roleManager.CreateAsync(owner);
-            await _roleManager.CreateAsync(user);
-            return Ok("Roles Seeded");
+            return Ok(seedRoles);
         }
 
         //Route -> Register
@@ -77,35 +34,10 @@ namespace JwtAuthenticationAspNet.Controllers
 
         public async Task<IActionResult> Register(RegisterDto registerDto)
         {
-            var isUserExist = await _userManager.FindByNameAsync(registerDto.UserName);
-            if (isUserExist != null)
-            {
-                return BadRequest("User Already Exist");
-            }
-
-            var user = new IdentityUser()
-            {
-                UserName = registerDto.UserName,
-                Email = registerDto.Email,
-                SecurityStamp = Guid.NewGuid().ToString()
-            };
-
-            var createUserResult = await _userManager.CreateAsync(user, registerDto.Password);
-
-            if (!createUserResult.Succeeded)
-            {
-                var errorString = "User Creation Failed: ";
-                foreach (var error in createUserResult.Errors)
-                {
-                    errorString += error.Description + " ";
-                }
-                return BadRequest(errorString);
-            }
-
-            //Add Default Role
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.User);
-
-            return Ok("User Created Successfully");
+            var registerResponse = await _authService.RegisterAsync(registerDto);
+            if (registerResponse.IsSuccess)
+                return Ok(registerResponse);
+            return BadRequest(registerResponse);
         }
 
         //Route -> Login
@@ -114,37 +46,11 @@ namespace JwtAuthenticationAspNet.Controllers
 
         public async Task<IActionResult> Login(LoginDto loginDto)
         {
-            var user = await _userManager.FindByNameAsync(loginDto.UserName);
+            var loginResponse = await _authService.LoginAsync(loginDto);
+            if (loginResponse.IsSuccess)
+                return Ok(loginResponse);
+            return BadRequest(loginResponse);
 
-            if (user == null)
-            {
-                return Unauthorized("Invalid Credentials");
-            }
-
-            var isPasswordValid = await _userManager.CheckPasswordAsync(user, loginDto.Password);
-
-            if (!isPasswordValid)
-            {
-                return Unauthorized("Invalid Credentials");
-            }
-
-            var userRoles = await _userManager.GetRolesAsync(user);
-
-            var authClaims = new List<Claim>()
-            {
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim(ClaimTypes.NameIdentifier, user.Id),
-                new Claim("JwtId", Guid.NewGuid().ToString()),
-            };
-
-            foreach (var userRole in userRoles)
-            {
-                authClaims.Add(new Claim(ClaimTypes.Role, userRole));
-            }
-
-            var token = GenerateNewJsonWebToken(authClaims);
-
-            return Ok(token);
         }
 
         //Route -> Make user-> admin
@@ -153,15 +59,10 @@ namespace JwtAuthenticationAspNet.Controllers
 
         public async Task<IActionResult> MakeAdmin(UpdatePermissionDto updatePermissionDto)
         {
-            var user = await _userManager.FindByNameAsync(updatePermissionDto.UserName);
-
-            if (user == null)
-            {
-                return Unauthorized("Invalid UserName");
-            }
-
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.Admin);
-            return Ok("User is now an admin");
+            var makeAdminResponse = await _authService.MakeAdminAsync(updatePermissionDto);
+            if (makeAdminResponse.IsSuccess)
+                return Ok(makeAdminResponse);
+            return BadRequest(makeAdminResponse);
         }
 
         //Route -> Make user-> owner
@@ -170,15 +71,10 @@ namespace JwtAuthenticationAspNet.Controllers
 
         public async Task<IActionResult> MakeOwner(UpdatePermissionDto updatePermissionDto)
         {
-            var user = await _userManager.FindByNameAsync(updatePermissionDto.UserName);
-
-            if (user == null)
-            {
-                return Unauthorized("Invalid UserName");
-            }
-
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.Owner);
-            return Ok("User is now an owner");
+            var makeOwnerResponse = await _authService.MakeOwnerAsync(updatePermissionDto);
+            if (makeOwnerResponse.IsSuccess)
+                return Ok(makeOwnerResponse);
+            return BadRequest(makeOwnerResponse);
         }
 
     }
